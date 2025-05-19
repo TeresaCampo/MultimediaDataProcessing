@@ -5,7 +5,7 @@ This repository contains my personal implementations and assignments developed d
 
 ---
 
-## 📚 Course Overview
+## Course Overview
 
 The course covers a wide range of multimedia topics, including:
 
