@@ -1,230 +1,608 @@
-#include <cstdio>
 #include <print>
-#include <iostream>
 #include <fstream>
-#include <expected>
+#include <cstdio>
 
-#include <string>
 #include <vector>
-#include <cmath>
+#include <string>
 
-template<typename T>
 struct image {
-	int h_ = 0;
-	int w_ = 0;
-	std::vector<T> data_;
+	std::vector<uint8_t> data_;
+	uint32_t r_ = 0;
+	uint32_t c_ = 0;
 
-	image(int h, int w) : h_(h), w_(w) {
-		data_.resize(h * w);
+	image() {};
+	image(uint32_t r, uint32_t c) {
+		r_ = r;
+		c_ = c;
+		data_.resize(r * c);
 	};
 
-	T& operator()(int r, int c) {
-		return data_[r * w_ + c];
-	}
+	void set_rows(uint32_t r) {
+		r_ = r;
+		data_.resize(r_ * c_);
+	};
+	void set_cols(uint32_t c) {
+		c_ = c;
+		data_.resize(r_ * c_);
+	};
+
 	char* rawdata() {
 		return reinterpret_cast<char*>(data_.data());
 	}
 	size_t rawsize() {
-		return h_ * w_ * sizeof(T);
+		return data_.size();
 	}
-	
+
+	uint8_t& operator()(uint32_t r, uint32_t c) {
+		return data_[r * c_ + c];
+	}
 };
 
-std::expected<image<uint8_t>, std::string>
-extract_PGM_file(std::ifstream& is) {
-	//read .pgm file
-	std::string header;
+int check_compression_inputs(std::string input_file, std::string output_file) {
+	if (input_file.substr(input_file.size() - 4, input_file.size()) != ".pgm") {
+		std::println("Error: input file should be .pgm");
+		return EXIT_FAILURE;
+	}
+	if (output_file.substr(output_file.size() - 4, output_file.size()) != ".mlt") {
+		std::println("Error: output file should be .mlt");
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
+}
+int check_decompression_inputs(std::string input_file, std::string output_file) {
+	if (input_file.substr(input_file.size() - 4, input_file.size()) != ".mlt") {
+		std::println("Error: input file should be .mlt");
+		return EXIT_FAILURE;
+	}
+
+	return EXIT_SUCCESS;
+}
+
+int extract_pgm_image(std::ifstream& is, image& img) {
+	//read header
+	//magic number
+	std::string header(2, ' ');
 	is >> header;
 	if (header != "P5") {
-		return std::unexpected("input file is not .pgm.");
+		std::println("Error: wrong .pgm header.");
+		return EXIT_FAILURE;
 	}
 
-	int w, h, maxval;
-	std::string val;
+	//W
+	std::string val(10, ' ');
 	is >> val;
 	while (val[0] == '#') {
 		std::string dummy;
-		std::getline(is, dummy, '\n');
+		std::getline(is, dummy);
 		is >> val;
 	}
-	w = std::stoi(val);
+	img.set_cols(std::stoi(val));
 
+	//H
 	is >> val;
 	while (val[0] == '#') {
 		std::string dummy;
-		std::getline(is, dummy, '\n');
+		std::getline(is, dummy);
 		is >> val;
 	}
-	h = std::stoi(val);
+	img.set_rows(std::stoi(val));
 
+	//maxval
 	is >> val;
 	while (val[0] == '#') {
 		std::string dummy;
-		std::getline(is, dummy, '\n');
+		std::getline(is, dummy);
 		is >> val;
 	}
-	maxval = std::stoi(val);
+	if (std::stoi(val) != 255) {
+		std::println("Error: .pgm maxval is {}, not 255.", std::stoi(val));
+		return EXIT_FAILURE;
+	}
 	is.get();
 
-	image<uint8_t> img(h, w);
+	//pixel raster
 	is.read(img.rawdata(), img.rawsize());
-
-	return img;
-}
-int compress_to_mlt(std::ifstream& is, std::ofstream& os) {
-	//read .pgm file
-	auto res = extract_PGM_file(is);
-	if (!res) {
-		std::print("Error: {}", res.error());
-		return EXIT_FAILURE;
-	}
-	image<uint8_t> img = res.value();
-
-	//write .mlt header
-	os << "MULTIRES";
-	uint32_t w = img.w_;
-	uint32_t h = img.h_;
-	os.write(reinterpret_cast<char*>(&w), 4);
-	os.write(reinterpret_cast<char*>(&h), 4);
-
-	//select level 1 pixels
-	for (int r = 0; r < img.h_; r+=8) {
-		for (int c = 0; c < img.w_; c+=8) {
-			os.put(img(r, c));
-		}
-	}
-
-	//select level 2 pixels
-	for (int r = 0; r < img.h_; r += 8) {
-		for (int c = 4; c < img.w_; c += 8) {
-			os.put(img(r, c));
-		}
-	}
-
-	//select level 3 pixels
-	for (int r = 4; r < img.h_; r += 8) {
-		for (int c = 0; c < img.w_; c += 4) {
-			os.put(img(r, c));
-		}
-	}
-
-	//select level 4 pixels
-	for (int r = 0; r < img.h_; r += 4) {
-		for (int c = 2; c < img.w_; c += 4) {
-			os.put(img(r, c));
-		}
-	}
-
-	//select level 5 pixels
-	for (int r = 2; r < img.h_; r += 4) {
-		for (int c = 0; c < img.w_; c += 2) {
-			os.put(img(r, c));
-		}
-	}
-
-	//select level 6 pixels
-	for (int r = 0; r < img.h_; r += 2) {
-		for (int c = 1; c < img.w_; c += 2) {
-			os.put(img(r, c));
-		}
-	}
-
-	//select level 7 pixels
-	for (int r = 1; r < img.h_; r += 2) {
-		for (int c = 0; c < img.w_; c += 1) {
-			os.put(img(r, c));
-		}
-	}
 	return EXIT_SUCCESS;
 }
+void image_to_mlt(std::ofstream& os, image& img) {
+	os << "MULTIRES";
 
-void write_PGM_header(int w, int h, std::ofstream& os) {
-	os << "P5 ";
-	os << w << " ";
-	os << h << " ";
-	os << 255 << "\n";
+	uint32_t c_ = img.c_;
+	uint32_t r_ = img.r_;
+	os.write(reinterpret_cast<char*>(&c_), 4);
+	os.write(reinterpret_cast<char*>(&r_), 4);
+
+	//determine pixels of the corresponding groups
+	std::vector<uint8_t> l1;
+	std::vector<uint8_t> l2;
+	std::vector<uint8_t> l3;
+	std::vector<uint8_t> l4;
+	std::vector<uint8_t> l5;
+	std::vector<uint8_t> l6;
+	std::vector<uint8_t> l7;
+
+	for (uint32_t r = 0; r < r_; r++) {
+		for (uint32_t c = 0; c < c_; c++) {
+			uint8_t val = img(r, c);
+
+			//l1
+			if ((r % 8 == 0) and (c % 8 == 0))	l1.push_back(val);
+			//l2
+			else if ((r % 8 == 0) and (c % 8 == 4))	l2.push_back(val);
+			//l3
+			else if ((r % 8 == 4) and (c % 4 == 0))	l3.push_back(val);
+			//l4
+			else if ((r % 4 == 0) and (c % 8 == 2)) l4.push_back(val);
+			else if ((r % 4 == 0) and (c % 8 == 6)) l4.push_back(val);
+			//l5
+			else if ((r % 8 == 2) and (c % 2 == 0)) l5.push_back(val);
+			else if ((r % 8 == 6) and (c % 2 == 0)) l5.push_back(val);
+			//l6
+			else if ((r % 2 == 0) and (c % 2 == 1))l6.push_back(val);
+			//l7
+			else if (r % 2 == 1) l7.push_back(val);
+			else {
+				std::println("No match found, aka error.");
+			}
+		}
+	}
+
+	os.write(reinterpret_cast<char*>(l1.data()), l1.size());
+	os.write(reinterpret_cast<char*>(l2.data()), l2.size());
+	os.write(reinterpret_cast<char*>(l3.data()), l3.size());
+	os.write(reinterpret_cast<char*>(l4.data()), l4.size());
+	os.write(reinterpret_cast<char*>(l5.data()), l5.size());
+	os.write(reinterpret_cast<char*>(l6.data()), l6.size());
+	os.write(reinterpret_cast<char*>(l7.data()), l7.size());
+	return;
 }
-int decompress_from_mlt(std::ifstream& is, std::string prefix) {
+int mlt_to_levelpixels(std::ifstream& is, std::vector<std::vector<uint8_t>>& levels, uint32_t& r_, uint32_t& c_) {
 	//read header
 	std::string header(8, ' ');
-	is.read(&header[0], 8);
+	is.read(header.data(), 8);
 	if (header != "MULTIRES") {
-		std::print("Error: input file is not .mlt\n");
+		std::println("Error: wrong input file header");
 		return EXIT_FAILURE;
 	}
+	is.read(reinterpret_cast<char*>(&c_), 4);
+	is.read(reinterpret_cast<char*>(&r_), 4);
 
-	int w = 0;
-	int h = 0;
-	is.read(reinterpret_cast<char*>(&w), 4);
-	is.read(reinterpret_cast<char*>(&h), 4);
-	//reconstruct level 1-------------------------------------------
-	std::ofstream f_l1(prefix + "_1.pgm", std::ios::binary);
-	if (!f_l1) {
-		std::println("Error: fail opnening file {}", prefix + "_1.pgm");
-		return EXIT_FAILURE;
-	}
-	write_PGM_header(w, h, f_l1);
-
-	int nblocks_columns = static_cast<int>(std::ceil(w / 8.));
-	int nblocks_lines = static_cast<int>(std::ceil(h / 8.));
-	int npixels_l1 = nblocks_columns * nblocks_lines;
-
-	std::vector<uint8_t> pixels(npixels_l1);
-	is.read(reinterpret_cast<char*>(pixels.data()), npixels_l1);
-
-	for (int r = 0; r < h; r ++) {
-		for (int c = 0; c < w; c ++) {
-			auto pixel = pixels[(r / 8) * nblocks_columns + (c / 8)];
-			f_l1.put(pixel);
+	//calculate number of pixels per level
+	std::vector<uint32_t> levels_size(7, 0);
+	for (uint32_t r = 0; r < r_; ++r) {
+		for (uint32_t c = 0; c < c_; ++c) {
+			//l1
+			if ((r % 8 == 0) and (c % 8 == 0))	levels_size[0]++;
+			//l2
+			else if ((r % 8 == 0) and (c % 8 == 4))	levels_size[1]++;
+			//l3
+			else if ((r % 8 == 4) and (c % 4 == 0))	levels_size[2]++;
+			//l4
+			else if ((r % 4 == 0) and (c % 8 == 2))	levels_size[3]++;
+			else if ((r % 4 == 0) and (c % 8 == 6)) levels_size[3]++;
+			//l5
+			else if ((r % 8 == 2) and (c % 2 == 0)) levels_size[4]++;
+			else if ((r % 8 == 6) and (c % 2 == 0)) levels_size[4]++;
+			//l6
+			else if ((r % 2 == 0) and (c % 2 == 1)) levels_size[5]++;
+			//l7
+			else if (r % 2 == 1) levels_size[6]++;
 		}
 	}
 
-	//reconstruct level 2-------------------------------------------
-	std::ofstream f_l2(prefix + "_2.pgm", std::ios::binary);
-	if (!f_l2) {
-		std::println("Error: fail opnening file {}", prefix + "_2.pgm");
-		return EXIT_FAILURE;
-	}
-	write_PGM_header(w, h, f_l2);
-	nblocks_columns = static_cast<int>(std::ceil(w / 4.));
-	nblocks_lines = static_cast<int>(std::ceil(h / 8.));
-	int npixels_l2 = static_cast<int>(std::ceil(w / 4.))
-
-	pixels.resize(npixels_l2);
-	is.read(reinterpret_cast<char*>(pixels.data()), npixels_l2);
-
-	for (int r = 0; r < h; r++) {
-		for (int c = 0; c < w; c++) {
-			auto pixel = pixels[(r / 8) * nblocks_columns + (c / 4)];
-			f_l2.put(pixel);
-		}
+	//read pixels per level
+	for (int l = 0; l < 7; l++) {
+		std::vector<uint8_t> level(levels_size[l]);
+		is.read(reinterpret_cast<char*>(level.data()), levels_size[l]);
+		levels.push_back(level);
 	}
 	return EXIT_SUCCESS;
+}
+
+void write_pgm_header(std::ofstream& os, uint32_t r_, uint32_t c_) {
+	os << "P5 ";
+	os << std::to_string(c_) << " ";
+	os << std::to_string(r_) << " ";
+	os << std::to_string(255) << "\n";
+}
+void levelpixels_to_l7(std::string filename, std::vector<std::vector<uint8_t>>& levels, uint32_t r_, uint32_t c_) {
+	std::ofstream os(filename + "_7.pgm", std::ios::binary);
+	write_pgm_header(os, r_, c_);
+
+	uint32_t c_l1 = 0;
+	uint32_t c_l2 = 0;
+	uint32_t c_l3 = 0;
+	uint32_t c_l4 = 0;
+	uint32_t c_l5 = 0;
+	uint32_t c_l6 = 0;
+	uint32_t c_l7 = 0;
+
+	//reconstruct l7 image
+	for (uint32_t r = 0; r < r_; ++r) {
+		for (uint32_t c = 0; c < c_; ++c) {
+			//l1
+			if ((r % 8 == 0) and (c % 8 == 0)) {
+				os.write(reinterpret_cast<char*>(&levels[0][c_l1]), 1);
+				c_l1++;
+			}
+			//l2
+			else if ((r % 8 == 0) and (c % 8 == 4)) {
+				os.write(reinterpret_cast<char*>(&levels[1][c_l2]), 1);
+				c_l2++;
+			}
+			//l3
+			else if ((r % 8 == 4) and (c % 4 == 0)) {
+				os.write(reinterpret_cast<char*>(&levels[2][c_l3]), 1);
+				c_l3++;
+			}
+			//l4
+			else if ((r % 4 == 0) and (c % 8 == 2)) {
+				os.write(reinterpret_cast<char*>(&levels[3][c_l4]), 1);
+				c_l4++;
+			}	
+			else if ((r % 4 == 0) and (c % 8 == 6)) {
+				os.write(reinterpret_cast<char*>(&levels[3][c_l4]), 1);
+				c_l4++;
+			}
+			//l5
+			else if ((r % 8 == 2) and (c % 2 == 0)) {
+				os.write(reinterpret_cast<char*>(&levels[4][c_l5]), 1);
+				c_l5++;
+			}
+			else if ((r % 8 == 6) and (c % 2 == 0)) {
+				os.write(reinterpret_cast<char*>(&levels[4][c_l5]), 1);
+				c_l5++;
+			}
+			//l6
+			else if ((r % 2 == 0) and (c % 2 == 1)) {
+				os.write(reinterpret_cast<char*>(&levels[5][c_l6]), 1);
+				c_l6++;
+			}
+			//l7
+			else if (r % 2 == 1) {
+				os.write(reinterpret_cast<char*>(&levels[6][c_l7]), 1);
+				c_l7++;
+			}
+		}
+	}
+}
+void levelpixels_to_l6(std::string filename, std::vector<std::vector<uint8_t>>& levels, uint32_t r_, uint32_t c_) {
+	std::ofstream os(filename + "_6.pgm", std::ios::binary);
+	write_pgm_header(os, r_, c_);
+
+	uint32_t c_l1 = 0;
+	uint32_t c_l2 = 0;
+	uint32_t c_l3 = 0;
+	uint32_t c_l4 = 0;
+	uint32_t c_l5 = 0;
+	uint32_t c_l6 = 0;
+	uint32_t c_l7 = 0;
+
+	image img(r_, c_);
+	//reconstruct l6 image
+	for (uint32_t r = 0; r < r_; ++r) {
+		for (uint32_t c = 0; c < c_; ++c) {
+			if (r % 2 == 1) {
+				img(r, c) = img(r - 1, c);
+			}
+			else {
+				//l1
+				if ((r % 8 == 0) and (c % 8 == 0)) {
+					img(r, c) = levels[0][c_l1];
+					c_l1++;
+				}
+				//l2
+				else if ((r % 8 == 0) and (c % 8 == 4)) {
+					img(r, c) = levels[1][c_l2];
+					c_l2++;
+				}
+				//l3
+				else if ((r % 8 == 4) and (c % 4 == 0)) {
+					img(r, c) = levels[2][c_l3];
+					c_l3++;
+				}
+				//l4
+				else if ((r % 4 == 0) and (c % 8 == 2)) {
+					img(r, c) = levels[3][c_l4];
+					c_l4++;
+				}
+				else if ((r % 4 == 0) and (c % 8 == 6)) {
+					img(r, c) = levels[3][c_l4];
+					c_l4++;
+				}
+				//l5
+				else if ((r % 8 == 2) and (c % 2 == 0)) {
+					img(r, c) = levels[4][c_l5];
+					c_l5++;
+				}
+				else if ((r % 8 == 6) and (c % 2 == 0)) {
+					img(r, c) = levels[4][c_l5];
+					c_l5++;
+				}
+				//l6
+				else if ((r % 2 == 0) and (c % 2 == 1)) {
+					img(r, c) = levels[5][c_l6];
+					c_l6++;
+				}
+			}
+		}
+	}
+	os.write(img.rawdata(), img.rawsize());
+}
+void levelpixels_to_l5(std::string filename, std::vector<std::vector<uint8_t>>& levels, uint32_t r_, uint32_t c_) {
+	std::ofstream os(filename + "_5.pgm", std::ios::binary);
+	write_pgm_header(os, r_, c_);
+
+	uint32_t c_l1 = 0;
+	uint32_t c_l2 = 0;
+	uint32_t c_l3 = 0;
+	uint32_t c_l4 = 0;
+	uint32_t c_l5 = 0;
+	uint32_t c_l6 = 0;
+	uint32_t c_l7 = 0;
+
+	image img(r_, c_);
+	//reconstruct l5 image
+	for (uint32_t r = 0; r < r_; ++r) {
+		for (uint32_t c = 0; c < c_; ++c) {
+			if (r % 2 == 1) {
+				img(r, c) = img(r - 1, c);
+			}
+			else if (c % 2 == 1) {
+				img(r, c) = img(r, c-1);
+			}
+			else {
+				//l1
+				if ((r % 8 == 0) and (c % 8 == 0)) {
+					img(r, c) = levels[0][c_l1];
+					c_l1++;
+				}
+				//l2
+				else if ((r % 8 == 0) and (c % 8 == 4)) {
+					img(r, c) = levels[1][c_l2];
+					c_l2++;
+				}
+				//l3
+				else if ((r % 8 == 4) and (c % 4 == 0)) {
+					img(r, c) = levels[2][c_l3];
+					c_l3++;
+				}
+				//l4
+				else if ((r % 4 == 0) and (c % 8 == 2)) {
+					img(r, c) = levels[3][c_l4];
+					c_l4++;
+				}
+				else if ((r % 4 == 0) and (c % 8 == 6)) {
+					img(r, c) = levels[3][c_l4];
+					c_l4++;
+				}
+				//l5
+				else if ((r % 8 == 2) and (c % 2 == 0)) {
+					img(r, c) = levels[4][c_l5];
+					c_l5++;
+				}
+				else if ((r % 8 == 6) and (c % 2 == 0)) {
+					img(r, c) = levels[4][c_l5];
+					c_l5++;
+				}
+			}
+		}
+	}
+	os.write(img.rawdata(), img.rawsize());
+}
+void levelpixels_to_l4(std::string filename, std::vector<std::vector<uint8_t>>& levels, uint32_t r_, uint32_t c_) {
+	std::ofstream os(filename + "_4.pgm", std::ios::binary);
+	write_pgm_header(os, r_, c_);
+
+	uint32_t c_l1 = 0;
+	uint32_t c_l2 = 0;
+	uint32_t c_l3 = 0;
+	uint32_t c_l4 = 0;
+	uint32_t c_l5 = 0;
+	uint32_t c_l6 = 0;
+	uint32_t c_l7 = 0;
+
+	image img(r_, c_);
+	//reconstruct l4 image
+	for (uint32_t r = 0; r < r_; ++r) {
+		for (uint32_t c = 0; c < c_; ++c) {
+			if (r % 4 != 0) {
+				img(r, c) = img(r - 1, c);
+			}
+			else if (c % 2 == 1) {
+				img(r, c) = img(r, c - 1);
+			}
+			else {
+				//l1
+				if ((r % 8 == 0) and (c % 8 == 0)) {
+					img(r, c) = levels[0][c_l1];
+					c_l1++;
+				}
+				//l2
+				else if ((r % 8 == 0) and (c % 8 == 4)) {
+					img(r, c) = levels[1][c_l2];
+					c_l2++;
+				}
+				//l3
+				else if ((r % 8 == 4) and (c % 4 == 0)) {
+					img(r, c) = levels[2][c_l3];
+					c_l3++;
+				}
+				//l4
+				else if ((r % 4 == 0) and (c % 8 == 2)) {
+					img(r, c) = levels[3][c_l4];
+					c_l4++;
+				}
+				else if ((r % 4 == 0) and (c % 8 == 6)) {
+					img(r, c) = levels[3][c_l4];
+					c_l4++;
+				}
+			}
+		}
+	}
+	os.write(img.rawdata(), img.rawsize());
+}
+void levelpixels_to_l3(std::string filename, std::vector<std::vector<uint8_t>>& levels, uint32_t r_, uint32_t c_) {
+	std::ofstream os(filename + "_3.pgm", std::ios::binary);
+	write_pgm_header(os, r_, c_);
+
+	uint32_t c_l1 = 0;
+	uint32_t c_l2 = 0;
+	uint32_t c_l3 = 0;
+	uint32_t c_l4 = 0;
+	uint32_t c_l5 = 0;
+	uint32_t c_l6 = 0;
+	uint32_t c_l7 = 0;
+
+	image img(r_, c_);
+	//reconstruct l3 image
+	for (uint32_t r = 0; r < r_; ++r) {
+		for (uint32_t c = 0; c < c_; ++c) {
+			if (r % 4 != 0) {
+				img(r, c) = img(r - 1, c);
+			}
+			else if (c % 4 != 0) {
+				img(r, c) = img(r, c - 1);
+			}
+			else {
+				//l1
+				if ((r % 8 == 0) and (c % 8 == 0)) {
+					img(r, c) = levels[0][c_l1];
+					c_l1++;
+				}
+				//l2
+				else if ((r % 8 == 0) and (c % 8 == 4)) {
+					img(r, c) = levels[1][c_l2];
+					c_l2++;
+				}
+				//l3
+				else if ((r % 8 == 4) and (c % 4 == 0)) {
+					img(r, c) = levels[2][c_l3];
+					c_l3++;
+				}
+			}
+		}
+	}
+	os.write(img.rawdata(), img.rawsize());
+}
+void levelpixels_to_l2(std::string filename, std::vector<std::vector<uint8_t>>& levels, uint32_t r_, uint32_t c_) {
+	std::ofstream os(filename + "_2.pgm", std::ios::binary);
+	write_pgm_header(os, r_, c_);
+
+	uint32_t c_l1 = 0;
+	uint32_t c_l2 = 0;
+	uint32_t c_l3 = 0;
+	uint32_t c_l4 = 0;
+	uint32_t c_l5 = 0;
+	uint32_t c_l6 = 0;
+	uint32_t c_l7 = 0;
+
+	image img(r_, c_);
+	//reconstruct l2 image
+	for (uint32_t r = 0; r < r_; ++r) {
+		for (uint32_t c = 0; c < c_; ++c) {
+			if (r % 8 != 0) {
+				img(r, c) = img(r - 1, c);
+			}
+			else if (c % 4 != 0) {
+				img(r, c) = img(r, c - 1);
+			}
+			else {
+				//l1
+				if ((r % 8 == 0) and (c % 8 == 0)) {
+					img(r, c) = levels[0][c_l1];
+					c_l1++;
+				}
+				//l2
+				else if ((r % 8 == 0) and (c % 8 == 4)) {
+					img(r, c) = levels[1][c_l2];
+					c_l2++;
+				}
+			}
+		}
+	}
+	os.write(img.rawdata(), img.rawsize());
+}
+void levelpixels_to_l1(std::string filename, std::vector<std::vector<uint8_t>>& levels, uint32_t r_, uint32_t c_) {
+	std::ofstream os(filename + "_1.pgm", std::ios::binary);
+	write_pgm_header(os, r_, c_);
+
+	uint32_t c_l1 = 0;
+	uint32_t c_l2 = 0;
+	uint32_t c_l3 = 0;
+	uint32_t c_l4 = 0;
+	uint32_t c_l5 = 0;
+	uint32_t c_l6 = 0;
+	uint32_t c_l7 = 0;
+
+	image img(r_, c_);
+	//reconstruct l1 image
+	for (uint32_t r = 0; r < r_; ++r) {
+		for (uint32_t c = 0; c < c_; ++c) {
+			if (r % 8 != 0) {
+				img(r, c) = img(r - 1, c);
+			}
+			else if (c % 8 != 0) {
+				img(r, c) = img(r, c - 1);
+			}
+			else {
+				//l1
+				if ((r % 8 == 0) and (c % 8 == 0)) {
+					img(r, c) = levels[0][c_l1];
+					c_l1++;
+				}
+			}
+		}
+	}
+	os.write(img.rawdata(), img.rawsize());
 }
 
 int main(int argc, char** argv) {
 	if (argc != 4) {
-		std::print("Error: program accepts 3 parameters, {} were provided.\n", argc - 1);
+		std::println("Error: program accepts 3 parameters, not {}.", argc - 1);
 		return EXIT_FAILURE;
 	}
 
-	std::ifstream is(argv[2], std::ios::binary);
+	std::string mode(argv[1]);
+	std::string input_file(argv[2]);
+	std::string output_file(argv[3]);
+	std::ifstream is(input_file, std::ios::binary);
 	if (!is) {
-		std::print("Error: fail to open input file {}", argv[2]);
+		std::println("Error: fial opening input file {}.", input_file);
 		return EXIT_FAILURE;
 	}
 
-	if (std::string(argv[1]) == "c") {
-		std::ofstream os(argv[3], std::ios::binary);
-		if (!os) {
-			std::print("Error: fail to open output file {}", argv[3]);
-			return EXIT_FAILURE;
-		}
+	if (mode == "c") {
+		std::ofstream os(output_file, std::ios::binary);
+		if (check_compression_inputs(input_file, output_file) == 1) return EXIT_FAILURE;
+		//extract image
+		image img;
+		if (extract_pgm_image(is, img) == 1) return EXIT_FAILURE;
 
-		return compress_to_mlt(is, os);
+		//write .mlt format
+		image_to_mlt(os, img);
+		return EXIT_SUCCESS;
 	}
-	if (std::string(argv[1]) == "d") {
-		return decompress_from_mlt(is, std::string(argv[3]));
+	if (mode == "d") {
+		if (check_decompression_inputs(input_file, output_file) == 1) return EXIT_FAILURE;
+		//extract level pixels
+		std::vector<std::vector<uint8_t>> levels;
+		uint32_t rows, cols;
+		mlt_to_levelpixels(is, levels, rows, cols);
+		//reconstruct levels
+		levelpixels_to_l7(output_file, levels, rows, cols);
+		levelpixels_to_l6(output_file, levels, rows, cols);
+		levelpixels_to_l5(output_file, levels, rows, cols);
+		levelpixels_to_l4(output_file, levels, rows, cols);
+		levelpixels_to_l3(output_file, levels, rows, cols);
+		levelpixels_to_l2(output_file, levels, rows, cols);
+		levelpixels_to_l1(output_file, levels, rows, cols);
+
+		return EXIT_SUCCESS;
 	}
-	return EXIT_FAILURE;
+	else {
+		std::println("Error: first parameter should be 'c' or 'd', not {}.", mode);
+		return EXIT_FAILURE;
+	}
 }
+
