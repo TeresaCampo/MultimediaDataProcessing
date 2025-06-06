@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <print>
 #include <fstream>
+#include <format>
 
 #include <string>
 #include <vector>
@@ -85,7 +86,7 @@ element extract_element(std::ifstream& is) {
 	uint8_t b = is.get();
 
 	//udef
-	if (b == 62 or b == 66 or b == 46 or b == 38 or b == 30) {
+	if (b == 62 or b == 54 or b == 46 or b == 38 or b == 30 or (b >> 4 & 0x0F)== 13 or (b >> 4 & 0x0F)==7) {
 		return element("udef", b);
 	}
 
@@ -118,7 +119,8 @@ element extract_element(std::ifstream& is) {
 	//large match
 	if (b == 240) {
 		element e =element("lrg_m", b);
-		e.code_.push_back(is.get());
+		read_remaining_opcode(is, e, 1);
+
 		return e;
 	}
 
@@ -181,6 +183,7 @@ void write_run(std::vector<char>& decoded_data, element& e, int pos) {
 	if (initial_pos >= decoded_data.size() or initial_pos < 0) {
 		auto a = 1;
 	}
+
 	for (int i = 0; i < e.match_length; i++) {
 		decoded_data.push_back(decoded_data[initial_pos + i]);
 	}
@@ -207,33 +210,40 @@ int decoder(std::ifstream& is, std::ofstream& os) {
 
 	std::vector<char> decoded_data;
 	int pos = 0;
+
+	std::ofstream os_debug("debug.txt", std::ios::binary);
 	while (1) {
 		//read following element
 		element e = extract_element(is);
 		e.extract_info();
+		os_debug << std::format("byte -> {:08b}\t element type-> {}\t", e.code_[0], e.type_);
 
+		
 		if (e.type_ == "sml_d" or e.type_ == "med_d" or e.type_ == "lrg_d" or e.type_ == "pre_d") {
 			write_literals(decoded_data, e, pos);
 			write_run(decoded_data, e, pos);
 
 			pos = pos + e.nbytes_literals + e.match_length;
-		}
-		else if (e.type_ == "sml_m" or e.type_ == "lrg_m") {
-			write_run(decoded_data, e, pos);
-
-			pos += e.match_length;;
+			os_debug << std::format("text -> {}\n", std::string(begin(decoded_data)+pos -e.nbytes_literals-e.match_length, end(decoded_data)));
 		}
 		else if (e.type_ == "sml_l" or e.type_ == "lrg_l") {
 			write_literals(decoded_data, e, pos);
 
 			pos += e.nbytes_literals;
-		}
-		else if (e.type_ == "eos") break;
-		
-		else if (decoded_data.size() > 1500) {
-			auto a = 2;
-		}
+			os_debug << std::format("text -> {}\n", std::string(begin(decoded_data) + pos - e.nbytes_literals , end(decoded_data)));
 
+		}
+		else if (e.type_ == "sml_m" or e.type_ == "lrg_m") {
+			write_run(decoded_data, e, pos);
+
+			pos += e.match_length;
+			os_debug << std::format("text -> {}\n", std::string(begin(decoded_data) + pos - e.match_length, end(decoded_data)));
+		}
+		
+		else if (e.type_ == "eos") break;
+		else {
+			os_debug << std::format("\n");
+		}
 	}
 
 	os.write(decoded_data.data(), decoded_data.size());
